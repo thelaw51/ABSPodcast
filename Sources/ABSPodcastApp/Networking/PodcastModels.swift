@@ -93,6 +93,8 @@ struct MediaProgress: Decodable, Sendable {
     let progress: Double?
     let currentTime: Double?
     let isFinished: Bool
+    /// Milliseconds since 1970.
+    let lastUpdate: Int64?
 }
 
 /// Response from `GET /api/me/progress`.

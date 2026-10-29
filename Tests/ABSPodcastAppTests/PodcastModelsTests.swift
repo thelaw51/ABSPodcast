@@ -37,7 +37,8 @@ struct EpisodeProgressTests {
             duration: duration,
             progress: progress,
             currentTime: currentTime,
-            isFinished: finished
+            isFinished: finished,
+            lastUpdate: nil
         )
     }
 
