@@ -1,17 +1,21 @@
 import SwiftUI
 
-/// Top-level view. Phase 1 replaces the placeholder with a switch between the
-/// sign-in flow and the library, driven by whether a saved session exists.
+/// Top-level view. Shows sign-in until there is a session, then the user's libraries.
 struct RootView: View {
+    @Environment(SessionStore.self) private var session
+
     var body: some View {
-        ContentUnavailableView(
-            AppInfo.displayName,
-            systemImage: "headphones",
-            description: Text("Version \(AppInfo.version). Server sign-in arrives in the next update.")
-        )
+        switch session.state {
+        case .signedOut:
+            SignInView()
+        case .signedIn(let account):
+            LibraryListView(account: account)
+                .id(account.server.base.absoluteString + account.userId)
+        }
     }
 }
 
 #Preview {
     RootView()
+        .environment(SessionStore(tokenStore: PreviewTokenStore()))
 }

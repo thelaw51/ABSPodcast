@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// App entry point. Owns the root scene and, in later phases, the shared
-/// session and player state that the views read from the environment.
+/// App entry point. Owns the session store and hands it to every view through the environment.
 @main
 struct ABSPodcastApp: App {
+    @State private var session = SessionStore()
+
     var body: some Scene {
         WindowGroup {
             RootView()
+                .environment(session)
         }
     }
 }
