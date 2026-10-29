@@ -91,8 +91,49 @@ enum Fixture {
         """
     }
 
+    /// Two podcasts. The second has a null author and ABS left out numEpisodesIncomplete (zero).
+    static let podcasts = """
+    {"results":[
+      {"id":"li_1","libraryId":"lib_pod","updatedAt":1761730000000,"mediaType":"podcast","numEpisodesIncomplete":3,
+       "media":{"id":"pod_1","numEpisodes":10,"tags":[],"coverPath":"/x.jpg",
+        "metadata":{"title":"Accidental Tech","author":"ATP","description":"<p>Three nerds</p>","explicit":false,"genres":[]}}},
+      {"id":"li_2","libraryId":"lib_pod","updatedAt":null,"mediaType":"podcast",
+       "media":{"id":"pod_2","numEpisodes":4,"tags":[],"coverPath":null,
+        "metadata":{"title":"Backlog","author":null,"description":null,"explicit":null,"genres":[]}}}
+    ],"total":2,"limit":0,"page":0,"mediaType":"podcast","minified":true}
+    """
+
+    /// One podcast with three episodes, one missing publishedAt, duration and season.
+    static let podcastDetail = """
+    {"id":"li_1","updatedAt":1761730000000,"mediaType":"podcast",
+     "media":{"id":"pod_1","libraryItemId":"li_1","numEpisodes":3,"tags":[],
+      "metadata":{"title":"Accidental Tech","author":"ATP","description":"<p>Three nerds</p>","explicit":false},
+      "episodes":[
+        {"id":"ep_old","libraryItemId":"li_1","title":"Old","season":"1","episode":"1","publishedAt":1700000000000,
+         "addedAt":1700000000000,"duration":3600.5,"enclosure":null,"chapters":[]},
+        {"id":"ep_new","libraryItemId":"li_1","title":"New","subtitle":"Latest","season":null,"episode":null,
+         "publishedAt":1760000000000,"addedAt":1760000000000,"duration":5400,
+         "enclosure":{"url":"https://x","type":"audio/mpeg","length":null}},
+        {"id":"ep_undated","libraryItemId":"li_1","title":"Undated","publishedAt":null,"addedAt":1750000000000}
+      ]}}
+    """
+
+    static let progress = """
+    {"mediaProgress":[
+      {"id":"mp1","libraryItemId":"li_1","episodeId":"ep_new","mediaItemType":"podcastEpisode","duration":0,
+       "progress":0.5,"currentTime":2700,"isFinished":false,"lastUpdate":1761000000000},
+      {"id":"mp2","libraryItemId":"li_1","episodeId":"ep_old","mediaItemType":"podcastEpisode","duration":3600,
+       "progress":1,"currentTime":3600,"isFinished":true,"lastUpdate":1761000000000},
+      {"id":"mp3","libraryItemId":"li_other","episodeId":"ep_undated","mediaItemType":"podcastEpisode","duration":100,
+       "progress":0.2,"currentTime":20,"isFinished":false,"lastUpdate":1761000000000},
+      {"id":"mp4","libraryItemId":"li_book","episodeId":null,"mediaItemType":"book","duration":100,
+       "progress":0.2,"currentTime":20,"isFinished":false,"lastUpdate":1761000000000}
+    ]}
+    """
+
     static let libraries = """
     {"libraries":[
+      {"id":"lib_future","name":"Comics","mediaType":"comic","displayOrder":4,"icon":null,"folders":[]},
       {"id":"lib_book","name":"Audiobooks","mediaType":"book","displayOrder":1,"icon":"audiobookshelf","folders":[]},
       {"id":"lib_pod2","name":"Archive","mediaType":"podcast","displayOrder":3,"icon":"podcast","folders":[]},
       {"id":"lib_pod","name":"Podcasts","mediaType":"podcast","displayOrder":2,"icon":"podcast","folders":[]}

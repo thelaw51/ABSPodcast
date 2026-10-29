@@ -21,15 +21,31 @@ struct LoginResponse: Decodable, Sendable {
     let user: User
 }
 
+/// What a library holds. Unknown values decode as `.other` so a future ABS type can't break the list.
+enum MediaType: Hashable, Sendable, Decodable {
+    case book
+    case podcast
+    case other(String)
+
+    init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "book": self = .book
+        case "podcast": self = .podcast
+        default: self = .other(raw)
+        }
+    }
+}
+
 /// A library on the server. A library holds either books or podcasts, never both.
 struct Library: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
-    let mediaType: String
+    let mediaType: MediaType
     let displayOrder: Int
     let icon: String?
 
-    var isPodcastLibrary: Bool { mediaType == "podcast" }
+    var isPodcastLibrary: Bool { mediaType == .podcast }
 }
 
 /// Response from `GET /api/libraries`.
