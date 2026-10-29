@@ -157,4 +157,10 @@ struct PlayerMathTests {
         #expect(Format.clock(3723) == "1:02:03")
         #expect(Format.clock(.nan) == "0:00")
     }
+
+    @Test func rateLabels() {
+        #expect(FullPlayerView.rateLabel(1) == "1×")
+        #expect(FullPlayerView.rateLabel(1.5) == "1.5×")
+        #expect(FullPlayerView.rateLabel(1.75) == "1.75×")
+    }
 }

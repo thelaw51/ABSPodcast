@@ -4,6 +4,7 @@ import SwiftUI
 struct EpisodeListView: View {
     let podcast: PodcastSummary
     @Environment(SessionStore.self) private var session
+    @Environment(AudioPlayer.self) private var player
     @State private var loadState = LoadState<EpisodeListData>.loading
 
     var body: some View {
@@ -28,8 +29,33 @@ struct EpisodeListView: View {
                 Button("Try Again") { Task { await load() } }
             }
         case .loaded(let data):
-            EpisodeList(data: data, coverURL: session.client?.coverURL(itemId: podcast.id, updatedAt: podcast.updatedAt, width: 300))
+            EpisodeList(
+                data: data,
+                coverURL: session.client?.coverURL(itemId: podcast.id, updatedAt: podcast.updatedAt, width: 300),
+                nowPlayingEpisodeId: player.item?.episodeId,
+                isPlaying: player.isPlaying
+            ) { episode in
+                play(episode, in: data)
+            }
         }
+    }
+
+    /// Plays an episode from the user's saved position, or toggles it if it's already loaded.
+    private func play(_ episode: Episode, in data: EpisodeListData) {
+        if player.item?.episodeId == episode.id {
+            player.togglePlayPause()
+            return
+        }
+        guard let client = session.client,
+              let item = PlaybackItem(
+                  episode: episode,
+                  podcast: data.detail.media.metadata,
+                  libraryItemId: podcast.id,
+                  startTime: data.progress.resumePosition(for: episode),
+                  streamURL: client.streamURL(contentPath:),
+                  artworkURL: client.coverURL(itemId: podcast.id, updatedAt: podcast.updatedAt, width: 600)
+              ) else { return }
+        player.play(item, tokens: TokenProvider(client: client))
     }
 
     private func load() async {
@@ -61,6 +87,9 @@ struct EpisodeListData {
 struct EpisodeList: View {
     let data: EpisodeListData
     let coverURL: URL?
+    var nowPlayingEpisodeId: String?
+    var isPlaying = false
+    var onSelect: (Episode) -> Void = { _ in }
 
     var body: some View {
         List {
@@ -69,7 +98,18 @@ struct EpisodeList: View {
             }
             Section("\(data.detail.media.episodes.count) Episodes") {
                 ForEach(data.detail.episodesNewestFirst) { episode in
-                    EpisodeRow(episode: episode, progress: data.progress.progress(for: episode))
+                    Button {
+                        onSelect(episode)
+                    } label: {
+                        EpisodeRow(
+                            episode: episode,
+                            progress: data.progress.progress(for: episode),
+                            nowPlaying: nowPlayingEpisodeId == episode.id ? isPlaying : nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    // ABS has no audio file for some feed entries, such as ones still downloading.
+                    .disabled(episode.audioTrack == nil)
                 }
             }
         }
@@ -119,8 +159,33 @@ struct PodcastHeader: View {
 struct EpisodeRow: View {
     let episode: Episode
     let progress: EpisodeProgress
+    /// nil when this isn't the loaded episode; otherwise whether it's playing.
+    var nowPlaying: Bool?
 
     var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            details
+            Spacer(minLength: 0)
+            Image(systemName: playIcon)
+                .font(.title2)
+                .foregroundStyle(episode.audioTrack == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.tint))
+                .accessibilityHidden(true)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(nowPlaying == true ? "Pauses" : "Plays")
+    }
+
+    private var playIcon: String {
+        switch nowPlaying {
+        case true?: "pause.circle.fill"
+        case false?: "play.circle.fill"
+        case nil: "play.circle"
+        }
+    }
+
+    private var details: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let date = episode.publishedDate {
                 Text(Format.date(date))
@@ -136,7 +201,6 @@ struct EpisodeRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
