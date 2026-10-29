@@ -1,0 +1,9 @@
+// Copy to Config/Local.xcconfig (git ignores it) and fill in your own values.
+
+// Your Apple ID's team ID, shown in Xcode > Settings > Accounts.
+// A free (personal team) account works but installs expire after 7 days.
+DEVELOPMENT_TEAM = ABCDE12345
+
+// Free accounts need a bundle ID nobody else has registered. Change this if
+// Xcode reports that com.thelaw51.ABSPodcastApp is unavailable.
+// PRODUCT_BUNDLE_IDENTIFIER = com.example.ABSPodcastApp
