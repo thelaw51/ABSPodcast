@@ -16,6 +16,8 @@ actor ABSClient {
     private let tokenStore: any TokenStore
     private var tokens: AuthTokens?
     private var refreshTask: Task<AuthTokens, Error>?
+    /// Set by `logout`, so a refresh that was already in flight can't bring tokens back.
+    private var isLoggedOut = false
 
     /// How long an access token must still be valid before it is handed to long-running work
     /// such as an audio stream. Ten minutes covers a pause and resume without a 401.
@@ -162,42 +164,69 @@ actor ABSClient {
         server.url(for: String(contentPath.drop { $0 == "/" }))
     }
 
-    /// Revokes this device's session on the server, then forgets the tokens locally.
+    /// Forgets the tokens locally, then revokes this device's session on the server.
     ///
-    /// Local tokens are deleted even if the server can't be reached.
+    /// The tokens go first, so no request that interleaves with the revoke can use or
+    /// refresh them. Local tokens are deleted even if the server can't be reached.
     func logout() async {
-        if let refreshToken = tokens?.refreshToken {
-            var request = URLRequest(url: server.url(for: "logout"))
-            request.httpMethod = "POST"
-            request.setValue(refreshToken, forHTTPHeaderField: "x-refresh-token")
-            _ = try? await Self.send(request, using: session)
-        }
+        isLoggedOut = true
+        let refreshToken = tokens?.refreshToken
         clearTokens()
+        if let refreshToken { await revoke(refreshToken) }
+    }
+
+    private func revoke(_ refreshToken: String) async {
+        var request = URLRequest(url: server.url(for: "logout"))
+        request.httpMethod = "POST"
+        request.setValue(refreshToken, forHTTPHeaderField: "x-refresh-token")
+        _ = try? await Self.send(request, using: session)
     }
 
     // MARK: - Request plumbing
 
     private func authorizedGet<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws(ABSError) -> T {
+        try Self.decode(T.self, from: await authorizedData(.init(method: "GET", path: path, query: query)))
+    }
+
+    /// One authenticated call, described before the token is attached so it can be rebuilt
+    /// for the retry after a refresh.
+    private struct Call {
+        let method: String
+        let path: String
+        var query: [URLQueryItem] = []
+        var body: Data?
+        /// Shorter than the session default for progress writes, which a later write supersedes.
+        var timeout: TimeInterval?
+    }
+
+    /// Sends a call and returns the body of a 200, refreshing once on a 401.
+    private func authorizedData(_ call: Call) async throws(ABSError) -> Data {
         guard let current = tokens else { throw .sessionExpired }
 
-        var (data, response) = try await Self.send(authorizedRequest(path, query: query, token: current.accessToken), using: session)
+        var (data, response) = try await Self.send(authorizedRequest(call, token: current.accessToken), using: session)
         if response.statusCode == 401 {
             let fresh = try await refreshedTokens(replacing: current)
-            (data, response) = try await Self.send(authorizedRequest(path, query: query, token: fresh.accessToken), using: session)
+            (data, response) = try await Self.send(authorizedRequest(call, token: fresh.accessToken), using: session)
         }
 
         switch response.statusCode {
-        case 200: return try Self.decode(T.self, from: data)
+        case 200: return data
         case 401: throw .sessionExpired
         default: throw .http(status: response.statusCode)
         }
     }
 
-    private func authorizedRequest(_ path: String, query: [URLQueryItem], token: String) -> URLRequest {
-        var url = server.url(for: path)
-        if !query.isEmpty { url.append(queryItems: query) }
+    private func authorizedRequest(_ call: Call, token: String) -> URLRequest {
+        var url = server.url(for: call.path)
+        if !call.query.isEmpty { url.append(queryItems: call.query) }
         var request = URLRequest(url: url)
+        request.httpMethod = call.method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body = call.body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        if let timeout = call.timeout { request.timeoutInterval = timeout }
         return request
     }
 
@@ -226,6 +255,7 @@ actor ABSClient {
     }
 
     private func performRefresh(using refreshToken: String) async throws(ABSError) -> AuthTokens {
+        guard !isLoggedOut else { throw .sessionExpired }
         var request = URLRequest(url: server.url(for: "auth/refresh"))
         request.httpMethod = "POST"
         request.setValue(refreshToken, forHTTPHeaderField: "x-refresh-token")
@@ -238,6 +268,11 @@ actor ABSClient {
 
         let user = try Self.decode(LoginResponse.self, from: data).user
         guard let newRefreshToken = user.refreshToken else { throw .missingRefreshToken }
+        // Signed out while this refresh was in flight: revoke the token it produced too.
+        guard !isLoggedOut else {
+            await revoke(newRefreshToken)
+            throw .sessionExpired
+        }
         let fresh = AuthTokens(accessToken: user.accessToken, refreshToken: newRefreshToken)
         // The old refresh token dies shortly after rotation, so keep the new pair in memory
         // even if the Keychain write fails. The running session survives; only a relaunch
@@ -270,5 +305,68 @@ actor ABSClient {
         } catch {
             throw .decoding
         }
+    }
+
+    private static func encode(_ value: some Encodable) throws(ABSError) -> Data {
+        do {
+            return try JSONEncoder().encode(value)
+        } catch {
+            throw .decoding
+        }
+    }
+}
+
+// MARK: - Playback sessions and progress
+
+extension ABSClient {
+    /// How long a session or progress call may take. A later write carries a newer position
+    /// anyway, and playback falls back to the file if a session can't be opened in time.
+    static let progressTimeout: TimeInterval = 10
+
+    /// Opens an ABS playback session for an episode. ABS closes this device's previous session
+    /// first, and replies with where to resume and which file to stream.
+    func startEpisodeSession(libraryItemId: String, episodeId: String, device: DeviceInfo) async throws(ABSError) -> PlaybackSessionInfo {
+        let body = try Self.encode(StartPlaybackRequest(deviceInfo: device))
+        let call = Call(method: "POST", path: "api/items/\(libraryItemId)/play/\(episodeId)", body: body, timeout: Self.progressTimeout)
+        let data = try await authorizedData(call)
+        return try Self.decode(PlaybackSessionInfo.self, from: data)
+    }
+
+    /// Reports the position and listening time for an open session. ABS updates the user's
+    /// progress from it, and marks the episode finished near the end.
+    func syncSession(id: String, _ update: SessionSync) async throws(ABSError) {
+        let call = Call(method: "POST", path: "api/session/\(id)/sync", body: try Self.encode(update), timeout: Self.progressTimeout)
+        _ = try await authorizedData(call)
+    }
+
+    /// Closes the session, with a final sync if anything changed since the last one.
+    func closeSession(id: String, _ update: SessionSync?) async throws(ABSError) {
+        let body = try update.map { (value) throws(ABSError) in try Self.encode(value) }
+        let call = Call(method: "POST", path: "api/session/\(id)/close", body: body, timeout: Self.progressTimeout)
+        _ = try await authorizedData(call)
+    }
+
+    /// The user's progress record for one episode, or nil if there isn't one.
+    func progress(libraryItemId: String, episodeId: String) async throws(ABSError) -> MediaProgress? {
+        do {
+            let call = Call(method: "GET", path: "api/me/progress/\(libraryItemId)/\(episodeId)", timeout: Self.progressTimeout)
+            return try Self.decode(MediaProgress.self, from: await authorizedData(call))
+        } catch .http(status: 404) {
+            return nil
+        }
+    }
+
+    /// Writes progress directly, for when there is no open session to sync through.
+    ///
+    /// ABS applies this unconditionally, so callers holding an old position must compare it
+    /// with `progress(libraryItemId:episodeId:)` first.
+    func updateProgress(libraryItemId: String, episodeId: String, _ update: ProgressUpdate) async throws(ABSError) {
+        let call = Call(
+            method: "PATCH",
+            path: "api/me/progress/\(libraryItemId)/\(episodeId)",
+            body: try Self.encode(update),
+            timeout: Self.progressTimeout
+        )
+        _ = try await authorizedData(call)
     }
 }
