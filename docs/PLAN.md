@@ -43,11 +43,14 @@ Built against ABS v2.37.1, which issues JWT sessions: a 1-hour access token and 
 
 ### Phase 3: playback
 
-- Stream episodes with `AVPlayer`, using the ABS auth token on media requests.
-- Background audio: `UIBackgroundModes` contains `audio`, and the app sets the `.playback` audio session category.
-- Lock screen and Control Center controls through `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter`.
-- Mini player above the tab bar and a full-screen player. Skip back and forward, playback speed, scrubbing.
-- Handle interruptions (calls, Siri) and route changes (headphones unplugged pauses playback).
+Streams each episode's `audioTrack.contentUrl` (`/api/items/{id}/file/{ino}`) directly. Phase 3 writes nothing to the server: the position lives in memory, so it doesn't reach the web app or survive the app being closed. Phase 4 adds that.
+
+- `AVPlayer` sends the bearer token in a request header, not the URL.
+- Access tokens last an hour, and ABS rejects expired ones. The player asks for a token with at least ten minutes left when it loads or resumes, and if a request still fails mid-episode, it refreshes once and reloads at the last position that played.
+- Background audio: `UIBackgroundModes` contains `audio` (merged in from `Config/Info.plist`), and the session uses `.playback` with `.spokenAudio`.
+- Lock screen and Control Center: title, podcast, artwork, scrubbing, skip back 15 and forward 30.
+- Mini player above the content and a full-screen player with scrubber, speed (0.8× to 2×) and AirPlay.
+- Calls and Siri pause and resume; unplugging headphones pauses.
 
 ### Phase 4: progress sync
 

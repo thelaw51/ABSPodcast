@@ -51,4 +51,11 @@ struct EpisodeProgressIndex: Sendable {
     func progress(for episode: Episode) -> EpisodeProgress {
         EpisodeProgress(byEpisode[episode.id], episodeDuration: episode.duration)
     }
+
+    /// Where playback should start: the saved position, or the beginning for unplayed and
+    /// finished episodes.
+    func resumePosition(for episode: Episode) -> TimeInterval {
+        guard let record = byEpisode[episode.id], !record.isFinished else { return 0 }
+        return max(0, record.currentTime ?? 0)
+    }
 }

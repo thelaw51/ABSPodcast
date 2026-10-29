@@ -17,6 +17,10 @@ actor ABSClient {
     private var tokens: AuthTokens?
     private var refreshTask: Task<AuthTokens, Error>?
 
+    /// How long an access token must still be valid before it is handed to long-running work
+    /// such as an audio stream. Ten minutes covers a pause and resume without a 401.
+    static let tokenSafetyMargin: TimeInterval = 600
+
     /// A session that keeps no cookies or cache on disk and refuses redirects to another host,
     /// so a redirect can't carry the password or refresh token somewhere else.
     static func makeSession() -> URLSession {
@@ -126,6 +130,36 @@ actor ABSClient {
         if let updatedAt { query.append(URLQueryItem(name: "ts", value: String(updatedAt))) }
         url.append(queryItems: query)
         return url
+    }
+
+    /// An access token that stays valid for at least `minimumValidity` seconds.
+    ///
+    /// AVPlayer fetches audio with whatever token it was given, for as long as the episode
+    /// plays, so the player asks for a token with time to spare. Refreshing goes through
+    /// the same single shared refresh as every other request.
+    func freshAccessToken(minimumValidity: TimeInterval = tokenSafetyMargin, now: Date = .now) async throws(ABSError) -> String {
+        guard let current = tokens else { throw .sessionExpired }
+        guard let expiry = JWT.expiry(of: current.accessToken),
+              expiry.timeIntervalSince(now) < minimumValidity else {
+            // Either it lasts long enough, or it isn't a readable JWT and the server decides.
+            return current.accessToken
+        }
+        return try await refreshedTokens(replacing: current).accessToken
+    }
+
+    /// Refreshes after the server rejected the current access token outside `authorizedGet`,
+    /// such as an audio request from AVPlayer.
+    func refreshAccessToken() async throws(ABSError) -> String {
+        guard let current = tokens else { throw .sessionExpired }
+        return try await refreshedTokens(replacing: current).accessToken
+    }
+
+    /// Absolute URL for an ABS `contentUrl` such as `/api/items/{id}/file/{ino}`.
+    ///
+    /// `contentUrl` is rooted at the server and leaves out any sub-path ABS runs under, so it
+    /// is resolved against the base like every other endpoint rather than as a relative URL.
+    nonisolated func streamURL(contentPath: String) -> URL {
+        server.url(for: String(contentPath.drop { $0 == "/" }))
     }
 
     /// Revokes this device's session on the server, then forgets the tokens locally.

@@ -22,6 +22,12 @@ targets:
     sources:
       - Sources/ABSPodcastApp
       - Resources
+    # Keys with no INFOPLIST_KEY_ build setting. Xcode merges this file with the generated keys.
+    # Lives in Config/ because Resources/ is a source folder and would copy it twice.
+    info:
+      path: Config/Info.plist
+      properties:
+        UIBackgroundModes: [audio]
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1"
