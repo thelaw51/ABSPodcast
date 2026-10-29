@@ -16,15 +16,19 @@ struct PlaybackItem: Equatable, Sendable {
 
 extension PlaybackItem {
     /// Builds an item for an episode, or nil if ABS has no audio file for it.
+    ///
+    /// An open ABS session's track and duration win over the episode's, since the server
+    /// chose them for this playback.
     init?(
         episode: Episode,
         podcast: PodcastMetadata,
         libraryItemId: String,
         startTime: TimeInterval,
         streamURL: (String) -> URL,
-        artworkURL: URL?
+        artworkURL: URL?,
+        session: PlaybackSessionInfo? = nil
     ) {
-        guard let contentPath = episode.audioTrack?.contentUrl else { return nil }
+        guard let contentPath = session?.audioTracks.first?.contentUrl ?? episode.audioTrack?.contentUrl else { return nil }
         self.init(
             episodeId: episode.id,
             libraryItemId: libraryItemId,
@@ -33,7 +37,7 @@ extension PlaybackItem {
             author: podcast.author,
             artworkURL: artworkURL,
             streamURL: streamURL(contentPath),
-            duration: episode.duration,
+            duration: session?.duration ?? episode.duration,
             startTime: startTime
         )
     }
