@@ -1,0 +1,23 @@
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - DerivedData
+  - build
+
+opt_in_rules:
+  - empty_count
+  - first_where
+  - modifier_order
+  - sorted_imports
+  - vertical_whitespace_closing_braces
+
+line_length:
+  warning: 140
+  error: 200
+
+identifier_name:
+  excluded:
+    - id
+    - url

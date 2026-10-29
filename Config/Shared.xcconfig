@@ -1,0 +1,10 @@
+// Settings shared by every configuration. Values here are safe to commit.
+// Per-machine values (signing team, bundle ID override) go in Local.xcconfig,
+// which git ignores. Copy Local.xcconfig.example to get started.
+
+PRODUCT_BUNDLE_IDENTIFIER = com.thelaw51.ABSPodcastApp
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+
+// The "?" makes the include optional, so a fresh clone still builds for the simulator.
+#include? "Local.xcconfig"
