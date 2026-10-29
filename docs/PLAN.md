@@ -27,11 +27,13 @@ XcodeGen project, app and test targets, SwiftLint config, the local signing conf
 
 ### Phase 1: connect and sign in
 
-- Ask the server for its version first. ABS changed its login and token handling across releases, and the client has to match the server it talks to.
-- Server URL entry with validation, then username and password login.
-- Store the token in the Keychain and the server URL in `UserDefaults`. Sign out clears both.
+Built against ABS v2.37.1, which issues JWT sessions: a 1-hour access token and a 30-day refresh token that rotates on every refresh.
+
+- Check `GET /status` first, to confirm the address is ABS and that password sign-in is enabled.
+- Server URL entry with validation (https only, sub-paths allowed), then `POST /login` with `x-return-tokens: true` so the refresh token comes back in the body.
+- Store both tokens in the Keychain and the account in `UserDefaults`. Sign out revokes this device's session on the server and clears both.
+- Refresh on a 401, with one shared refresh for concurrent requests, since a rotated refresh token can't be spent twice.
 - List the user's libraries and keep only the podcast ones.
-- Open question: if Cloudflare Access protects the ABS hostname, API calls will get a Cloudflare login page instead of JSON. Check before building the login screen.
 
 ### Phase 2: browse
 
