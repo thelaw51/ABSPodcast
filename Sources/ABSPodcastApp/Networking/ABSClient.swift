@@ -16,6 +16,8 @@ actor ABSClient {
     private let tokenStore: any TokenStore
     private var tokens: AuthTokens?
     private var refreshTask: Task<AuthTokens, Error>?
+    /// Set by `logout`, so a refresh that was already in flight can't bring tokens back.
+    private var isLoggedOut = false
 
     /// How long an access token must still be valid before it is handed to long-running work
     /// such as an audio stream. Ten minutes covers a pause and resume without a 401.
@@ -162,17 +164,22 @@ actor ABSClient {
         server.url(for: String(contentPath.drop { $0 == "/" }))
     }
 
-    /// Revokes this device's session on the server, then forgets the tokens locally.
+    /// Forgets the tokens locally, then revokes this device's session on the server.
     ///
-    /// Local tokens are deleted even if the server can't be reached.
+    /// The tokens go first, so no request that interleaves with the revoke can use or
+    /// refresh them. Local tokens are deleted even if the server can't be reached.
     func logout() async {
-        if let refreshToken = tokens?.refreshToken {
-            var request = URLRequest(url: server.url(for: "logout"))
-            request.httpMethod = "POST"
-            request.setValue(refreshToken, forHTTPHeaderField: "x-refresh-token")
-            _ = try? await Self.send(request, using: session)
-        }
+        isLoggedOut = true
+        let refreshToken = tokens?.refreshToken
         clearTokens()
+        if let refreshToken { await revoke(refreshToken) }
+    }
+
+    private func revoke(_ refreshToken: String) async {
+        var request = URLRequest(url: server.url(for: "logout"))
+        request.httpMethod = "POST"
+        request.setValue(refreshToken, forHTTPHeaderField: "x-refresh-token")
+        _ = try? await Self.send(request, using: session)
     }
 
     // MARK: - Request plumbing
@@ -226,6 +233,7 @@ actor ABSClient {
     }
 
     private func performRefresh(using refreshToken: String) async throws(ABSError) -> AuthTokens {
+        guard !isLoggedOut else { throw .sessionExpired }
         var request = URLRequest(url: server.url(for: "auth/refresh"))
         request.httpMethod = "POST"
         request.setValue(refreshToken, forHTTPHeaderField: "x-refresh-token")
@@ -238,6 +246,11 @@ actor ABSClient {
 
         let user = try Self.decode(LoginResponse.self, from: data).user
         guard let newRefreshToken = user.refreshToken else { throw .missingRefreshToken }
+        // Signed out while this refresh was in flight: revoke the token it produced too.
+        guard !isLoggedOut else {
+            await revoke(newRefreshToken)
+            throw .sessionExpired
+        }
         let fresh = AuthTokens(accessToken: user.accessToken, refreshToken: newRefreshToken)
         // The old refresh token dies shortly after rotation, so keep the new pair in memory
         // even if the Keychain write fails. The running session survives; only a relaunch
