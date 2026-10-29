@@ -5,6 +5,7 @@ struct EpisodeListView: View {
     let podcast: PodcastSummary
     @Environment(SessionStore.self) private var session
     @Environment(AudioPlayer.self) private var player
+    @Environment(PlaybackCoordinator.self) private var playback
     @State private var loadState = LoadState<EpisodeListData>.loading
 
     var body: some View {
@@ -13,6 +14,8 @@ struct EpisodeListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task { await load() }
             .refreshable { await load() }
+            // Runs once on appear, where refreshProgress does nothing until the first load finishes.
+            .task(id: playback.progressRevision) { await refreshProgress() }
     }
 
     @ViewBuilder
@@ -33,29 +36,35 @@ struct EpisodeListView: View {
                 data: data,
                 coverURL: session.client?.coverURL(itemId: podcast.id, updatedAt: podcast.updatedAt, width: 300),
                 nowPlayingEpisodeId: player.item?.episodeId,
-                isPlaying: player.isPlaying
+                isPlaying: player.isPlaying,
+                startingEpisodeId: playback.startingEpisodeId
             ) { episode in
                 play(episode, in: data)
             }
         }
     }
 
-    /// Plays an episode from the user's saved position, or toggles it if it's already loaded.
+    /// Plays an episode through an ABS session, or toggles it if it's already loaded.
     private func play(_ episode: Episode, in data: EpisodeListData) {
         if player.item?.episodeId == episode.id {
             player.togglePlayPause()
             return
         }
-        guard let client = session.client,
-              let item = PlaybackItem(
-                  episode: episode,
-                  podcast: data.detail.media.metadata,
-                  libraryItemId: podcast.id,
-                  startTime: data.progress.resumePosition(for: episode),
-                  streamURL: client.streamURL(contentPath:),
-                  artworkURL: client.coverURL(itemId: podcast.id, updatedAt: podcast.updatedAt, width: 600)
-              ) else { return }
-        player.play(item, tokens: TokenProvider(client: client))
+        guard let client = session.client else { return }
+        playback.play(
+            episode,
+            podcast: data.detail.media.metadata,
+            libraryItemId: podcast.id,
+            artworkURL: client.coverURL(itemId: podcast.id, updatedAt: podcast.updatedAt, width: 600),
+            savedPosition: data.progress.resumePosition(for: episode)
+        )
+    }
+
+    /// Refetches only the progress, after a sync changed it on the server.
+    private func refreshProgress() async {
+        guard let client = session.client, case .loaded(let data) = loadState,
+              let records = try? await client.mediaProgress() else { return }
+        loadState = .loaded(EpisodeListData(detail: data.detail, progress: EpisodeProgressIndex(records, libraryItemId: podcast.id)))
     }
 
     private func load() async {
@@ -89,6 +98,7 @@ struct EpisodeList: View {
     let coverURL: URL?
     var nowPlayingEpisodeId: String?
     var isPlaying = false
+    var startingEpisodeId: String?
     var onSelect: (Episode) -> Void = { _ in }
 
     var body: some View {
@@ -104,7 +114,8 @@ struct EpisodeList: View {
                         EpisodeRow(
                             episode: episode,
                             progress: data.progress.progress(for: episode),
-                            nowPlaying: nowPlayingEpisodeId == episode.id ? isPlaying : nil
+                            nowPlaying: nowPlayingEpisodeId == episode.id ? isPlaying : nil,
+                            isStarting: startingEpisodeId == episode.id
                         )
                     }
                     .buttonStyle(.plain)
@@ -161,15 +172,22 @@ struct EpisodeRow: View {
     let progress: EpisodeProgress
     /// nil when this isn't the loaded episode; otherwise whether it's playing.
     var nowPlaying: Bool?
+    /// True while the episode's ABS session is opening.
+    var isStarting = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             details
             Spacer(minLength: 0)
-            Image(systemName: playIcon)
-                .font(.title2)
-                .foregroundStyle(episode.audioTrack == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.tint))
-                .accessibilityHidden(true)
+            if isStarting {
+                ProgressView()
+                    .frame(width: 28)
+            } else {
+                Image(systemName: playIcon)
+                    .font(.title2)
+                    .foregroundStyle(episode.audioTrack == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.tint))
+                    .accessibilityHidden(true)
+            }
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
