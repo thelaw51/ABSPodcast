@@ -163,6 +163,46 @@ struct ABSClientTests {
         let refreshes = stub.requests.filter { $0.url?.path() == "/abs/auth/refresh" }
         #expect(refreshes.count == 1)
     }
+
+    @Test func podcastsRequestsWholeLibrarySortedWithUnplayedCounts() async throws {
+        let stub = StubServer.stub { _ in .ok(Fixture.podcasts) }
+        let store = InMemoryTokenStore(AuthTokens(accessToken: "a1", refreshToken: "r1"))
+        let client = ABSClient(server: server, session: stub.session, tokenStore: store)
+
+        let podcasts = try await client.podcasts(inLibrary: "lib_pod")
+
+        #expect(podcasts.map(\.title) == ["Accidental Tech", "Backlog"])
+        #expect(podcasts.map(\.unplayedCount) == [3, 0])
+        let url = try #require(stub.requests.first?.url)
+        #expect(url.path() == "/abs/api/libraries/lib_pod/items")
+        let query = Set(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+        #expect(query == [
+            URLQueryItem(name: "sort", value: "media.metadata.title"),
+            URLQueryItem(name: "minified", value: "1"),
+            URLQueryItem(name: "include", value: "numEpisodesIncomplete")
+        ])
+    }
+
+    @Test func podcastDetailAndProgressDecode() async throws {
+        let stub = StubServer.stub { request in
+            request.url?.path() == "/abs/api/me/progress" ? .ok(Fixture.progress) : .ok(Fixture.podcastDetail)
+        }
+        let store = InMemoryTokenStore(AuthTokens(accessToken: "a1", refreshToken: "r1"))
+        let client = ABSClient(server: server, session: stub.session, tokenStore: store)
+
+        let detail = try await client.podcast(id: "li_1")
+        let progress = try await client.mediaProgress()
+
+        #expect(detail.media.episodes.count == 3)
+        #expect(progress.count == 4)
+        #expect(stub.requests.first?.url?.query() == "expanded=1")
+    }
+
+    @Test func coverURLKeepsSubPathAndCacheKey() {
+        let client = ABSClient(server: server, session: .shared, tokenStore: InMemoryTokenStore())
+        let url = client.coverURL(itemId: "li_1", updatedAt: 42, width: 300)
+        #expect(url.absoluteString == "https://abs.example.com/abs/api/items/li_1/cover?width=300&format=jpeg&ts=42")
+    }
 }
 
 /// Loads its initial tokens but fails every save, like a Keychain that refuses writes.

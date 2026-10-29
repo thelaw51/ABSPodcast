@@ -89,6 +89,45 @@ actor ABSClient {
             .sorted { $0.displayOrder < $1.displayOrder }
     }
 
+    /// Every podcast in a library, sorted by title, with each one's unplayed episode count.
+    ///
+    /// Omitting `limit` makes ABS return the whole library in one response.
+    func podcasts(inLibrary libraryId: String) async throws(ABSError) -> [PodcastSummary] {
+        let page: LibraryItemsPage = try await authorizedGet(
+            "api/libraries/\(libraryId)/items",
+            query: [
+                URLQueryItem(name: "sort", value: "media.metadata.title"),
+                URLQueryItem(name: "minified", value: "1"),
+                URLQueryItem(name: "include", value: "numEpisodesIncomplete")
+            ]
+        )
+        return page.results
+    }
+
+    /// One podcast with all of its episodes.
+    func podcast(id: String) async throws(ABSError) -> PodcastDetail {
+        try await authorizedGet("api/items/\(id)", query: [URLQueryItem(name: "expanded", value: "1")])
+    }
+
+    /// Every listening-progress record for the signed-in user, across all libraries.
+    func mediaProgress() async throws(ABSError) -> [MediaProgress] {
+        let response: MediaProgressResponse = try await authorizedGet("api/me/progress")
+        return response.mediaProgress
+    }
+
+    /// Cover art URL for a library item, sized for the screen.
+    ///
+    /// ABS serves covers without auth, so `AsyncImage` and the shared URL cache can load
+    /// them directly. Passing `updatedAt` as `ts` makes ABS send a one-day cache header and
+    /// changes the URL when the cover changes.
+    nonisolated func coverURL(itemId: String, updatedAt: Int64?, width: Int) -> URL {
+        var url = server.url(for: "api/items/\(itemId)/cover")
+        var query = [URLQueryItem(name: "width", value: String(width)), URLQueryItem(name: "format", value: "jpeg")]
+        if let updatedAt { query.append(URLQueryItem(name: "ts", value: String(updatedAt))) }
+        url.append(queryItems: query)
+        return url
+    }
+
     /// Revokes this device's session on the server, then forgets the tokens locally.
     ///
     /// Local tokens are deleted even if the server can't be reached.
@@ -104,13 +143,13 @@ actor ABSClient {
 
     // MARK: - Request plumbing
 
-    private func authorizedGet<T: Decodable>(_ path: String) async throws(ABSError) -> T {
+    private func authorizedGet<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws(ABSError) -> T {
         guard let current = tokens else { throw .sessionExpired }
 
-        var (data, response) = try await Self.send(authorizedRequest(path, token: current.accessToken), using: session)
+        var (data, response) = try await Self.send(authorizedRequest(path, query: query, token: current.accessToken), using: session)
         if response.statusCode == 401 {
             let fresh = try await refreshedTokens(replacing: current)
-            (data, response) = try await Self.send(authorizedRequest(path, token: fresh.accessToken), using: session)
+            (data, response) = try await Self.send(authorizedRequest(path, query: query, token: fresh.accessToken), using: session)
         }
 
         switch response.statusCode {
@@ -120,8 +159,10 @@ actor ABSClient {
         }
     }
 
-    private func authorizedRequest(_ path: String, token: String) -> URLRequest {
-        var request = URLRequest(url: server.url(for: path))
+    private func authorizedRequest(_ path: String, query: [URLQueryItem], token: String) -> URLRequest {
+        var url = server.url(for: path)
+        if !query.isEmpty { url.append(queryItems: query) }
+        var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request
     }

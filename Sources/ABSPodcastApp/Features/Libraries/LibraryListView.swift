@@ -1,25 +1,26 @@
 import SwiftUI
 
-/// The signed-in user's podcast libraries. Phase 2 makes each row open its podcasts.
+/// The signed-in user's podcast libraries, and the root of the browse navigation stack.
+///
+/// With a single podcast library, which is the usual setup, the app opens it straight away.
+/// The back button still returns here, where the account menu lives.
 struct LibraryListView: View {
     let account: Account
     @Environment(SessionStore.self) private var session
 
-    private enum LoadState {
-        case loading
-        case loaded([Library])
-        case failed(String)
-    }
-
-    @State private var loadState = LoadState.loading
+    @State private var loadState = LoadState<[Library]>.loading
+    @State private var path = NavigationPath()
+    @State private var didAutoOpen = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle("Libraries")
                 .toolbar { accountMenu }
                 .task { await load() }
                 .refreshable { await load() }
+                .navigationDestination(for: Library.self) { PodcastGridView(library: $0) }
+                .navigationDestination(for: PodcastSummary.self) { EpisodeListView(podcast: $0) }
         }
     }
 
@@ -44,7 +45,9 @@ struct LibraryListView: View {
             )
         case .loaded(let libraries):
             List(libraries) { library in
-                Label(library.name, systemImage: "mic")
+                NavigationLink(value: library) {
+                    Label(library.name, systemImage: "mic")
+                }
             }
         }
     }
@@ -67,7 +70,12 @@ struct LibraryListView: View {
         guard let client = session.client else { return }
         if case .failed = loadState { loadState = .loading }
         do {
-            loadState = .loaded(try await client.podcastLibraries())
+            let libraries = try await client.podcastLibraries()
+            loadState = .loaded(libraries)
+            if !didAutoOpen, libraries.count == 1, path.isEmpty {
+                didAutoOpen = true
+                path.append(libraries[0])
+            }
         } catch {
             session.handle(error)
             loadState = .failed(error.localizedDescription)
