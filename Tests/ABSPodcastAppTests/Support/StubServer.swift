@@ -77,6 +77,19 @@ final class InMemoryTokenStore: TokenStore {
     func delete() throws { tokens.withLock { $0 = nil } }
 }
 
+/// Builds an unsigned JWT with the given `exp`, enough for code that only reads claims.
+func makeJWT(exp: TimeInterval, extra: String = "") -> String {
+    func base64URL(_ string: String) -> String {
+        Data(string.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+    let header = base64URL(#"{"alg":"HS256","typ":"JWT"}"#)
+    let payload = base64URL(#"{"userId":"usr_1","type":"access"\#(extra),"exp":\#(Int(exp))}"#)
+    return "\(header).\(payload).signature"
+}
+
 /// Canned ABS response bodies, trimmed to the fields the app decodes plus a few it ignores.
 enum Fixture {
     static let status = """
@@ -113,7 +126,8 @@ enum Fixture {
          "addedAt":1700000000000,"duration":3600.5,"enclosure":null,"chapters":[]},
         {"id":"ep_new","libraryItemId":"li_1","title":"New","subtitle":"Latest","season":null,"episode":null,
          "publishedAt":1760000000000,"addedAt":1760000000000,"duration":5400,
-         "enclosure":{"url":"https://x","type":"audio/mpeg","length":null}},
+         "enclosure":{"url":"https://x","type":"audio/mpeg","length":null},
+         "audioTrack":{"index":1,"startOffset":0,"ino":"98765","contentUrl":"/api/items/li_1/file/98765","mimeType":"audio/mpeg"}},
         {"id":"ep_undated","libraryItemId":"li_1","title":"Undated","publishedAt":null,"addedAt":1750000000000}
       ]}}
     """

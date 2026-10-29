@@ -57,6 +57,13 @@ struct PodcastDetail: Decodable, Identifiable, Sendable {
 
 /// One podcast episode.
 struct Episode: Decodable, Identifiable, Hashable, Sendable {
+    /// The episode's audio file. Only the expanded item payload includes it.
+    struct AudioTrack: Decodable, Hashable, Sendable {
+        /// Server-rooted path such as `/api/items/{id}/file/{ino}`. Needs the bearer token.
+        let contentUrl: String
+        let mimeType: String?
+    }
+
     let id: String
     let libraryItemId: String?
     let title: String
@@ -69,6 +76,7 @@ struct Episode: Decodable, Identifiable, Hashable, Sendable {
     let addedAt: Int64?
     /// Seconds. Missing for episodes whose audio ABS hasn't probed.
     let duration: Double?
+    let audioTrack: AudioTrack?
 
     var publishedDate: Date? { publishedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } }
 
