@@ -10,11 +10,11 @@ import UIKit
 /// server still rejects a request mid-episode, it refreshes once and reloads at the last
 /// position that played.
 ///
-/// Phase 3 keeps the position in memory only. Phase 4 adds ABS playback sessions so the
-/// position syncs to the server.
+/// The player knows nothing about ABS sessions. It reports what happens through `onEvent`,
+/// and `PlaybackCoordinator` turns that into progress syncs.
 @MainActor
 @Observable
-final class AudioPlayer {
+final class AudioPlayer: PlaybackDriver {
     static let skipBackInterval: TimeInterval = 15
     static let skipForwardInterval: TimeInterval = 30
     static let rates: [Float] = [0.8, 1.0, 1.2, 1.5, 1.75, 2.0]
@@ -46,6 +46,7 @@ final class AudioPlayer {
     @ObservationIgnored private var playerObservers: [NSKeyValueObservation] = []
     @ObservationIgnored private var audioSessionObservers: [any NSObjectProtocol] = []
     @ObservationIgnored private let remoteCommands = RemoteCommands()
+    @ObservationIgnored var onEvent: (@MainActor (PlayerEvent) -> Void)?
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -97,6 +98,7 @@ final class AudioPlayer {
         isPlaying = false
         player.pause()
         updateNowPlaying()
+        onEvent?(.paused)
     }
 
     /// Resumes, reloading with a fresh token first if the current one is about to expire.
@@ -133,6 +135,7 @@ final class AudioPlayer {
             pendingSeek = target
         }
         updateNowPlaying()
+        onEvent?(.seeked)
     }
 
     func skip(by seconds: TimeInterval) {
@@ -256,6 +259,7 @@ final class AudioPlayer {
         isPlaying = false
         if let duration { currentTime = duration }
         updateNowPlaying()
+        onEvent?(.ended)
     }
 
     private func fail(_ error: (any Error)?) {
@@ -265,6 +269,7 @@ final class AudioPlayer {
         errorMessage = (error as? ABSError)?.localizedDescription
             ?? "Playback stopped. Check your connection and try again."
         updateNowPlaying()
+        onEvent?(.paused)
     }
 
     private func handleTick(_ seconds: TimeInterval) {
@@ -274,12 +279,15 @@ final class AudioPlayer {
             lastGoodTime = seconds
             recoveryAttempted = false
         }
+        onEvent?(.tick(playing: isPlaying && !isBuffering))
     }
+}
 
-    // MARK: - Observation
-    //
-    // Callbacks hop to the main actor themselves; see PlayerSystemHooks.swift for why.
+// MARK: - Observation
+//
+// Callbacks hop to the main actor themselves; see PlayerSystemHooks.swift for why.
 
+extension AudioPlayer {
     private func observePlayer() {
         player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
@@ -336,17 +344,15 @@ final class AudioPlayer {
     }
 }
 
+// MARK: - System integration
+
 extension AudioPlayer {
     /// Clamps a seek target into the playable range.
     nonisolated static func clamp(_ time: TimeInterval, duration: TimeInterval?) -> TimeInterval {
         let upper = duration.map { max(0, $0 - 1) } ?? .greatestFiniteMagnitude
         return min(max(0, time), upper)
     }
-}
 
-// MARK: - System integration
-
-extension AudioPlayer {
     // MARK: - Audio session
 
     private func activateAudioSession() {
@@ -363,6 +369,7 @@ extension AudioPlayer {
             pausedByInterruption = isPlaying
             isPlaying = false
             updateNowPlaying()
+            onEvent?(.paused)
         case .ended:
             if pausedByInterruption, options.contains(.shouldResume) { resume() }
             pausedByInterruption = false

@@ -4,7 +4,8 @@ import SwiftUI
 /// mini player pinned above them.
 struct RootView: View {
     @Environment(SessionStore.self) private var session
-    @Environment(AudioPlayer.self) private var player
+    @Environment(PlaybackCoordinator.self) private var playback
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isPlayerOpen = false
 
     var body: some View {
@@ -21,19 +22,27 @@ struct RootView: View {
                     .sheet(isPresented: $isPlayerOpen) {
                         FullPlayerView()
                     }
+                    // Positions queued by syncs that failed, possibly in an earlier launch.
+                    .task(id: account.userId) { await playback.flushPending() }
             }
         }
         .onChange(of: session.state) {
             // Any change of account, including sign-out and an expired session, ends playback,
             // so nothing keeps streaming with, or holding, the previous account's token.
             isPlayerOpen = false
-            player.stop()
+            playback.reset()
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await playback.flushPending() } }
         }
     }
 }
 
 #Preview {
+    let session = SessionStore(tokenStore: PreviewTokenStore())
+    let player = AudioPlayer()
     RootView()
-        .environment(SessionStore(tokenStore: PreviewTokenStore()))
-        .environment(AudioPlayer())
+        .environment(session)
+        .environment(player)
+        .environment(PlaybackCoordinator(player: player, session: session))
 }

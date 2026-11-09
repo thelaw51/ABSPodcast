@@ -20,6 +20,9 @@ final class SessionStore {
     private(set) var state: State = .signedOut
     /// The only client for the signed-in account. Every token consumer (player, sync) goes through it.
     private(set) var client: ABSClient?
+    /// Runs at the start of sign-out while the tokens still work, so playback can send its
+    /// final position and close its ABS session.
+    @ObservationIgnored var beforeSignOut: (@MainActor () async -> Void)?
 
     @ObservationIgnored private let tokenStore: any TokenStore
     @ObservationIgnored private let defaults: UserDefaults
@@ -70,6 +73,7 @@ final class SessionStore {
 
     /// Revokes the session on the server where possible and returns to the sign-in screen.
     func signOut() async {
+        await beforeSignOut?()
         await client?.logout()
         resetLocalSession()
     }

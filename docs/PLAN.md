@@ -54,10 +54,16 @@ Streams each episode's `audioTrack.contentUrl` (`/api/items/{id}/file/{ino}`) di
 
 ### Phase 4: progress sync
 
-- Open an ABS playback session when an episode starts, sync the position while it plays, and close the session when it stops.
-- Resume from the server position, so the app, the web client and other ABS apps agree.
-- Mark episodes finished near the end.
-- Queue syncs that fail while offline and retry them later.
+`PlaybackCoordinator` starts every episode through an ABS playback session (`POST /api/items/{id}/play/{episodeId}`), so the app, the web client and other ABS apps agree on where you are.
+
+- The session says where to resume and which file to stream. If it can't be opened, the episode plays from its file at the last known position and progress is written directly.
+- The app reports the position and listening time every 15 seconds of listening, on pause, two seconds after the last seek, and at the end. ABS marks an episode finished when less than 10 seconds remain, or past the library's own threshold.
+- Listening time is wall-clock time spent playing, like the ABS web player, so 2× speed and skips don't inflate the stats.
+- Starting another episode closes the previous session with its final position. Sign-out does the same before it revokes the tokens, giving up after four seconds if the server can't be reached.
+- Each position is saved on the phone before it is sent and dropped once ABS accepts it. Positions that didn't get through are sent when the app launches or returns to the foreground, unless the server already has newer listening for that episode. The queue is kept per server and user.
+- ABS keeps open sessions in memory, so after a server restart a sync gets a 404. The app then writes progress directly for the rest of that episode.
+- A random device ID stored on the phone means ABS replaces this device's previous session rather than leaving it open.
+- Listening time that couldn't be sent through a session is dropped. Only the position is retried, because ABS has no way to add listening time without a session.
 
 ### Later
 

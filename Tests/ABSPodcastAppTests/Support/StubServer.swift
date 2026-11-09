@@ -145,6 +145,20 @@ enum Fixture {
     ]}
     """
 
+    /// A direct-play session for `ep_new`, trimmed. ABS also returns the whole library item.
+    static let playbackSession = """
+    {"id":"sess_1","userId":"usr_1","libraryId":"lib_pod","libraryItemId":"li_1","episodeId":"ep_new",
+     "mediaType":"podcast","displayTitle":"New","duration":5400,"playMethod":0,"mediaPlayer":"AVPlayer",
+     "startTime":1234,"currentTime":1234,"timeListening":0,
+     "audioTracks":[{"index":1,"startOffset":0,"duration":5400,"title":"new.mp3",
+       "contentUrl":"/api/items/li_1/file/111","mimeType":"audio/mpeg","codec":"mp3"}]}
+    """
+
+    /// One episode's progress, last updated in 2027 by another device.
+    static let progressFromTheFuture = """
+    {"id":"mp1","libraryItemId":"li_1","episodeId":"ep_new","currentTime":50,"isFinished":false,"lastUpdate":1800000000000}
+    """
+
     static let libraries = """
     {"libraries":[
       {"id":"lib_future","name":"Comics","mediaType":"comic","displayOrder":4,"icon":null,"folders":[]},
